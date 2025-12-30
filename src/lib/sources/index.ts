@@ -1,6 +1,9 @@
 /**
  * Source Library Integration
- * Connects to sourcelibrary-v2 for grounding philosophical dialogue in actual texts
+ * Connects to sourcelibrary-v2 API for grounding philosophical dialogue in actual texts
+ *
+ * API: https://sourcelibrary.org/api
+ * MCP Server: sourcelibrary-v2/mcp-server
  */
 
 import { SourceBook, SourcePassage } from '../types';
@@ -10,15 +13,85 @@ import { SourceBook, SourcePassage } from '../types';
  */
 export interface SourceLibraryConfig {
   baseUrl: string;
-  apiKey?: string;
 }
 
 const DEFAULT_CONFIG: SourceLibraryConfig = {
-  baseUrl: process.env.SOURCELIBRARY_URL || 'https://sourcelibrary-v2.vercel.app',
+  baseUrl: process.env.SOURCE_LIBRARY_API || 'https://sourcelibrary.org/api',
 };
 
 /**
- * Client for interacting with sourcelibrary-v2
+ * Search result from the API
+ */
+interface SearchResult {
+  id: string;
+  type: 'book' | 'page';
+  book_id: string;
+  title: string;
+  display_title?: string;
+  author: string;
+  language: string;
+  published: string;
+  page_count?: number;
+  translated_count?: number;
+  has_doi: boolean;
+  doi?: string;
+  summary?: string;
+  page_number?: number;
+  snippet?: string;
+  snippet_type?: 'translation' | 'ocr' | 'summary';
+}
+
+/**
+ * Quote response from the API
+ */
+interface QuoteResponse {
+  quote: {
+    translation: string;
+    original?: string;
+    page: number;
+    book_id: string;
+    book_title: string;
+    display_title?: string;
+    author: string;
+    published: string;
+    language: string;
+  };
+  citation: {
+    inline: string;
+    footnote: string;
+    bibliography: string;
+    bibtex: string;
+    chicago: string;
+    mla: string;
+    url: string;
+    short_url: string;
+    doi_url?: string;
+  };
+  context?: {
+    previous_page?: string;
+    next_page?: string;
+  };
+}
+
+/**
+ * Book details from the API
+ */
+interface BookResponse {
+  id: string;
+  title: string;
+  display_title?: string;
+  author: string;
+  language: string;
+  published: string;
+  pages_count?: number;
+  pages_translated?: number;
+  doi?: string;
+  summary?: string | { data: string };
+  categories?: string[];
+}
+
+/**
+ * Client for interacting with sourcelibrary-v2 API
  */
 export class SourceLibraryClient {
   private config: SourceLibraryConfig;
@@ -28,146 +101,184 @@ export class SourceLibraryClient {
   }
 
   /**
-   * Get all books by an author
+   * Search the library for books and pages matching a query
    */
-  async getBooksByAuthor(authorId: string): Promise<SourceBook[]> {
-    const response = await fetch(
-      `${this.config.baseUrl}/api/books?author=${encodeURIComponent(authorId)}`
-    );
+  async search(options: {
+    query: string;
+    language?: string;
+    category?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    hasDoi?: boolean;
+    hasTranslation?: boolean;
+    bookId?: string;
+    searchContent?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    results: SearchResult[];
+    total: number;
+    query: string;
+  }> {
+    const params = new URLSearchParams({ q: options.query });
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch books: ${response.statusText}`);
+    if (options.language) params.set('language', options.language);
+    if (options.category) params.set('category', options.category);
+    if (options.dateFrom) params.set('date_from', options.dateFrom);
+    if (options.dateTo) params.set('date_to', options.dateTo);
+    if (options.hasDoi) params.set('has_doi', 'true');
+    if (options.hasTranslation) params.set('has_translation', 'true');
+    if (options.bookId) params.set('book_id', options.bookId);
+    if (options.searchContent !== undefined) {
+      params.set('search_content', String(options.searchContent));
     }
+    if (options.limit) params.set('limit', String(options.limit));
+    if (options.offset) params.set('offset', String(options.offset));
 
-    const data = await response.json();
-    return data.books.map(this.mapBook);
-  }
-
-  /**
-   * Get a specific book by ID
-   */
-  async getBook(bookId: string): Promise<SourceBook | null> {
-    const response = await fetch(
-      `${this.config.baseUrl}/api/books/${encodeURIComponent(bookId)}`
-    );
-
-    if (response.status === 404) {
-      return null;
-    }
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch book: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return this.mapBook(data.book);
-  }
-
-  /**
-   * Search for passages across the library
-   */
-  async searchPassages(
-    query: string,
-    options: {
-      authorId?: string;
-      bookId?: string;
-      limit?: number;
-    } = {}
-  ): Promise<SourcePassage[]> {
-    const params = new URLSearchParams({ q: query });
-    if (options.authorId) params.append('author', options.authorId);
-    if (options.bookId) params.append('book', options.bookId);
-    if (options.limit) params.append('limit', options.limit.toString());
-
-    const response = await fetch(
-      `${this.config.baseUrl}/api/search?${params.toString()}`
-    );
+    const response = await fetch(`${this.config.baseUrl}/search?${params}`);
 
     if (!response.ok) {
       throw new Error(`Search failed: ${response.statusText}`);
     }
 
-    const data = await response.json();
-    return data.results.map(this.mapPassage);
+    return response.json();
   }
 
   /**
-   * Get the full text content of a book
+   * Get a quote from a specific page with formatted citations
    */
-  async getBookContent(bookId: string): Promise<string | null> {
+  async getQuote(options: {
+    bookId: string;
+    page: number;
+    includeOriginal?: boolean;
+    includeContext?: boolean;
+  }): Promise<QuoteResponse> {
+    const params = new URLSearchParams({ page: String(options.page) });
+
+    if (options.includeOriginal !== undefined) {
+      params.set('include_original', String(options.includeOriginal));
+    }
+    if (options.includeContext) {
+      params.set('include_context', 'true');
+    }
+
     const response = await fetch(
-      `${this.config.baseUrl}/api/books/${encodeURIComponent(bookId)}/content`
+      `${this.config.baseUrl}/books/${options.bookId}/quote?${params}`
     );
 
-    if (response.status === 404) {
-      return null;
-    }
-
     if (!response.ok) {
-      throw new Error(`Failed to fetch content: ${response.statusText}`);
+      throw new Error(`Get quote failed: ${response.statusText}`);
     }
 
-    const data = await response.json();
-    return data.content;
+    return response.json();
   }
 
   /**
-   * Get passages from a specific chapter
+   * Get detailed information about a book
    */
-  async getChapterContent(
-    bookId: string,
-    chapterTitle: string
-  ): Promise<string | null> {
-    const response = await fetch(
-      `${this.config.baseUrl}/api/books/${encodeURIComponent(bookId)}/chapters/${encodeURIComponent(chapterTitle)}`
-    );
-
-    if (response.status === 404) {
-      return null;
-    }
+  async getBook(bookId: string): Promise<BookResponse> {
+    const response = await fetch(`${this.config.baseUrl}/books/${bookId}`);
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch chapter: ${response.statusText}`);
+      throw new Error(`Get book failed: ${response.statusText}`);
     }
 
-    const data = await response.json();
-    return data.content;
+    return response.json();
   }
 
-  private mapBook(raw: Record<string, unknown>): SourceBook {
-    return {
-      id: raw._id as string || raw.id as string,
-      title: raw.title as string,
-      author: raw.author as string,
-      authorId: raw.authorId as string || (raw.author as string).toLowerCase().replace(/\s+/g, '-'),
-      year: raw.year as number | null,
-      language: raw.language as string || 'Latin',
-      translatedFrom: raw.originalLanguage as string,
-      hasOCR: !!raw.ocrContent || !!raw.hasOCR,
-      hasTranslation: !!raw.translatedContent || !!raw.hasTranslation,
-      blobUrl: raw.blobUrl as string,
-      themes: (raw.themes as string[]) || [],
-      keyTerms: (raw.keyTerms as string[]) || [],
-    };
+  /**
+   * Search and return passages formatted for agent consumption
+   */
+  async searchPassages(
+    query: string,
+    options: {
+      authorName?: string;
+      bookId?: string;
+      limit?: number;
+    } = {}
+  ): Promise<SourcePassage[]> {
+    const searchResults = await this.search({
+      query,
+      bookId: options.bookId,
+      hasTranslation: true,
+      limit: options.limit || 10,
+    });
+
+    const passages: SourcePassage[] = [];
+
+    for (const result of searchResults.results) {
+      // Filter by author if specified
+      if (options.authorName &&
+          !result.author.toLowerCase().includes(options.authorName.toLowerCase())) {
+        continue;
+      }
+
+      if (result.type === 'page' && result.page_number && result.snippet) {
+        // Get full quote with citation
+        try {
+          const quoteResponse = await this.getQuote({
+            bookId: result.book_id,
+            page: result.page_number,
+            includeOriginal: true,
+          });
+
+          passages.push({
+            bookId: result.book_id,
+            bookTitle: result.display_title || result.title,
+            author: result.author,
+            pageNumber: result.page_number,
+            text: quoteResponse.quote.original || '',
+            translatedText: quoteResponse.quote.translation,
+            relevanceScore: 1.0, // Will be reranked by embeddings
+          });
+        } catch {
+          // If quote fetch fails, use snippet
+          passages.push({
+            bookId: result.book_id,
+            bookTitle: result.display_title || result.title,
+            author: result.author,
+            pageNumber: result.page_number,
+            text: result.snippet,
+            translatedText: result.snippet,
+          });
+        }
+      } else if (result.type === 'book' && result.summary) {
+        // Include book summary as a passage
+        passages.push({
+          bookId: result.book_id,
+          bookTitle: result.display_title || result.title,
+          author: result.author,
+          text: result.summary,
+          translatedText: result.summary,
+        });
+      }
+    }
+
+    return passages;
   }
 
-  private mapPassage(raw: Record<string, unknown>): SourcePassage {
+  /**
+   * Map search result to SourceBook type
+   */
+  resultToBook(result: SearchResult): SourceBook {
     return {
-      bookId: raw.bookId as string,
-      bookTitle: raw.bookTitle as string,
-      author: raw.author as string,
-      pageNumber: raw.page as number,
-      chapterTitle: raw.chapter as string,
-      text: raw.text as string,
-      translatedText: raw.translatedText as string,
-      relevanceScore: raw.score as number,
+      id: result.book_id,
+      title: result.title,
+      author: result.author,
+      authorId: result.author.toLowerCase().split(',')[0].trim().replace(/\s+/g, '-'),
+      year: result.published ? parseInt(result.published) : null,
+      language: result.language,
+      hasOCR: true,
+      hasTranslation: (result.translated_count || 0) > 0,
+      themes: [],
+      keyTerms: [],
     };
   }
 }
 
 /**
  * Passage retrieval with semantic search
- * Uses embeddings to find relevant passages for a topic
+ * Uses embeddings to rerank keyword search results
  */
 export interface SemanticPassageSearchConfig {
   client: SourceLibraryClient;
@@ -183,7 +294,7 @@ export async function findRelevantPassages(
   query: string,
   config: SemanticPassageSearchConfig,
   options: {
-    authorId?: string;
+    authorName?: string;
     bookId?: string;
     topK?: number;
   } = {}
@@ -191,11 +302,11 @@ export async function findRelevantPassages(
   const { client, getEmbedding, cosineSimilarity } = config;
   const topK = options.topK || 10;
 
-  // First, do keyword search to get candidates
+  // Get candidates from keyword search
   const candidates = await client.searchPassages(query, {
-    authorId: options.authorId,
+    authorName: options.authorName,
     bookId: options.bookId,
-    limit: topK * 3, // Get more candidates for reranking
+    limit: topK * 3, // Get more for reranking
   });
 
   if (candidates.length === 0) {
@@ -205,11 +316,11 @@ export async function findRelevantPassages(
   // Get query embedding
   const queryEmbedding = await getEmbedding(query);
 
-  // Get embeddings for candidates and compute similarity
+  // Score and rerank by embedding similarity
   const scoredPassages = await Promise.all(
     candidates.map(async passage => {
       const textToEmbed = passage.translatedText || passage.text;
-      const passageEmbedding = await getEmbedding(textToEmbed.slice(0, 1000)); // Truncate for embedding
+      const passageEmbedding = await getEmbedding(textToEmbed.slice(0, 1000));
       const similarity = cosineSimilarity(queryEmbedding, passageEmbedding);
       return {
         passage: { ...passage, relevanceScore: similarity },
@@ -235,10 +346,10 @@ export function formatPassagesForContext(
 
   for (const passage of passages) {
     const text = passage.translatedText || passage.text;
-    const formatted = `[${passage.author}, "${passage.bookTitle}"${passage.chapterTitle ? `, ${passage.chapterTitle}` : ''}]\n${text}\n\n`;
+    const pageRef = passage.pageNumber ? `, p. ${passage.pageNumber}` : '';
+    const formatted = `[${passage.author}, "${passage.bookTitle}"${pageRef}]\n${text}\n\n`;
 
     if (currentLength + formatted.length > maxLength) {
-      // Add truncated version if there's space
       const remaining = maxLength - currentLength - 50;
       if (remaining > 100) {
         result += `[${passage.author}, "${passage.bookTitle}"]\n${text.slice(0, remaining)}...\n`;
@@ -257,7 +368,6 @@ export function formatPassagesForContext(
  * Extract key concepts from a passage for keyword indexing
  */
 export function extractKeyConcepts(text: string): string[] {
-  // Common philosophical/alchemical terms to look for
   const importantTerms = [
     // Alchemical
     'quintessence', 'fifth essence', 'quinta essentia', 'philosopher\'s stone',
@@ -277,15 +387,7 @@ export function extractKeyConcepts(text: string): string[] {
   ];
 
   const lowerText = text.toLowerCase();
-  const found: string[] = [];
-
-  for (const term of importantTerms) {
-    if (lowerText.includes(term)) {
-      found.push(term);
-    }
-  }
-
-  return found;
+  return importantTerms.filter(term => lowerText.includes(term));
 }
 
 /**
@@ -294,7 +396,7 @@ export function extractKeyConcepts(text: string): string[] {
  */
 export async function buildReadingContext(
   client: SourceLibraryClient,
-  authorId: string,
+  authorName: string,
   topic: string,
   getEmbedding: (text: string) => Promise<number[]>,
   cosineSimilarity: (a: number[], b: number[]) => number,
@@ -304,19 +406,17 @@ export async function buildReadingContext(
   formattedContext: string;
   keyConcepts: string[];
 }> {
-  // Find relevant passages from the author's works
   const passages = await findRelevantPassages(topic, {
     client,
     getEmbedding,
     cosineSimilarity,
   }, {
-    authorId,
+    authorName,
     topK: maxPassages,
   });
 
   const formattedContext = formatPassagesForContext(passages);
 
-  // Extract key concepts for memory indexing
   const keyConcepts = new Set<string>();
   for (const passage of passages) {
     const text = passage.translatedText || passage.text;
@@ -329,5 +429,48 @@ export async function buildReadingContext(
     passages,
     formattedContext,
     keyConcepts: Array.from(keyConcepts),
+  };
+}
+
+/**
+ * Get a citable quote from a book page
+ * Returns formatted citation in multiple styles
+ */
+export async function getCitableQuote(
+  client: SourceLibraryClient,
+  bookId: string,
+  pageNumber: number
+): Promise<{
+  text: string;
+  original?: string;
+  citation: {
+    inline: string;
+    footnote: string;
+    doiUrl?: string;
+  };
+  context?: {
+    previous?: string;
+    next?: string;
+  };
+}> {
+  const response = await client.getQuote({
+    bookId,
+    page: pageNumber,
+    includeOriginal: true,
+    includeContext: true,
+  });
+
+  return {
+    text: response.quote.translation,
+    original: response.quote.original,
+    citation: {
+      inline: response.citation.inline,
+      footnote: response.citation.footnote,
+      doiUrl: response.citation.doi_url,
+    },
+    context: response.context ? {
+      previous: response.context.previous_page,
+      next: response.context.next_page,
+    } : undefined,
   };
 }
