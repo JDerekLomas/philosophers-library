@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import SimulationCanvas from '@/components/game/SimulationCanvas';
 import DialogueBox from '@/components/game/DialogueBox';
 import { createInitialState, SimulationState } from '@/lib/simulation/state';
-import { initializeSimulation, simulationStep } from '@/lib/simulation/loop';
+import { initializeSimulation, updateMovement, handleConversations } from '@/lib/simulation/loop';
 
 export default function Home() {
   const [state, setState] = useState<SimulationState | null>(null);
@@ -29,35 +29,46 @@ export default function Home() {
     }
   }, []);
 
-  // Game loop
+  // Render loop - smooth 60fps, no async
   useEffect(() => {
     if (!state) return;
 
-    const gameLoop = async (currentTime: number) => {
-      if (!stateRef.current) return;
+    const renderLoop = (currentTime: number) => {
+      if (!stateRef.current || stateRef.current.isPaused) {
+        animationRef.current = requestAnimationFrame(renderLoop);
+        return;
+      }
 
       const deltaTime = lastTimeRef.current ? currentTime - lastTimeRef.current : 16;
       lastTimeRef.current = currentTime;
 
-      // Run simulation step
-      await simulationStep(stateRef.current, deltaTime, triggerUpdate);
+      // Update movement only (sync, fast)
+      updateMovement(stateRef.current, deltaTime);
+      triggerUpdate();
 
-      // Schedule next frame
-      animationRef.current = requestAnimationFrame(gameLoop);
-
-      // Periodic state sync for rendering
-      if (Math.random() < 0.1) {
-        triggerUpdate();
-      }
+      animationRef.current = requestAnimationFrame(renderLoop);
     };
 
-    animationRef.current = requestAnimationFrame(gameLoop);
+    animationRef.current = requestAnimationFrame(renderLoop);
 
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
     };
+  }, [state, triggerUpdate]);
+
+  // Conversation loop - separate, async
+  useEffect(() => {
+    if (!state) return;
+
+    const conversationTick = async () => {
+      if (!stateRef.current || stateRef.current.isPaused) return;
+      await handleConversations(stateRef.current, triggerUpdate);
+    };
+
+    const interval = setInterval(conversationTick, 500); // Check every 500ms
+    return () => clearInterval(interval);
   }, [state, triggerUpdate]);
 
   // Toggle pause

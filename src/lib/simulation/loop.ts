@@ -1,6 +1,6 @@
 /**
  * Simulation Loop
- * Main game loop that updates agent positions and triggers conversations
+ * Separated into sync movement (60fps) and async conversations
  */
 
 import { SimulationState } from './state';
@@ -13,6 +13,10 @@ import {
   addTurn,
   buildDialogueContext,
 } from './conversation';
+
+// Track if we're currently generating dialogue
+let isGeneratingDialogue = false;
+let lastConversationCheck = 0;
 
 // Generate dialogue turn via API
 async function generateDialogueTurn(
@@ -63,22 +67,37 @@ async function generateDialogueTurn(
   }
 }
 
-// Single simulation step
-export async function simulationStep(
+/**
+ * Update movement only - called every frame (sync)
+ */
+export function updateMovement(
   state: SimulationState,
-  deltaTime: number,
-  onStateChange: () => void
-): Promise<void> {
+  deltaTime: number
+): void {
   if (state.isPaused) return;
 
   // Update time
   state.time += deltaTime * state.speed;
 
-  // Update agent movement
+  // Update agent positions
   updateAgentMovement(state, deltaTime);
+}
 
-  // Check for conversation triggers
-  if (!state.activeConversation) {
+/**
+ * Handle conversations - called periodically (async)
+ */
+export async function handleConversations(
+  state: SimulationState,
+  onStateChange: () => void
+): Promise<void> {
+  if (state.isPaused || isGeneratingDialogue) return;
+
+  const now = Date.now();
+
+  // Check for new conversations (throttled)
+  if (!state.activeConversation && now - lastConversationCheck > 1000) {
+    lastConversationCheck = now;
+
     const candidates = findConversationCandidates(state);
     if (candidates) {
       const [agent1, agent2] = candidates;
@@ -86,23 +105,26 @@ export async function simulationStep(
       onStateChange();
 
       // Generate first turn
+      isGeneratingDialogue = true;
       await generateDialogueTurn(state);
+      isGeneratingDialogue = false;
       onStateChange();
     }
-  } else {
-    // Continue active conversation
+  }
+
+  // Continue active conversation
+  if (state.activeConversation) {
     const conv = state.activeConversation;
 
     if (shouldEndConversation(conv)) {
       endConversation(state);
       onStateChange();
-    } else if (!conv.isGenerating) {
-      // Generate next turn after a short delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      if (state.activeConversation === conv) {
-        await generateDialogueTurn(state);
-        onStateChange();
-      }
+    } else if (!conv.isGenerating && !isGeneratingDialogue) {
+      // Generate next turn
+      isGeneratingDialogue = true;
+      await generateDialogueTurn(state);
+      isGeneratingDialogue = false;
+      onStateChange();
     }
   }
 }
