@@ -7,6 +7,7 @@ import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
   BOUNDS,
+  LIBRARY_LOCATIONS,
 } from '@/lib/simulation/state';
 
 interface SimulationCanvasProps {
@@ -155,11 +156,51 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: SimAgent): void {
     ctx.fill();
   }
 
-  // Thinking indicator if idle
-  if (state === 'thinking') {
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.font = '16px sans-serif';
-    ctx.fillText('...', x, y - 35);
+  // Reading indicator - small book icon
+  if (state === 'reading') {
+    ctx.fillStyle = '#f5deb3';
+    ctx.fillRect(x - 8, y - 40, 16, 12);
+    ctx.strokeStyle = '#8B4513';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - 8, y - 40, 16, 12);
+    ctx.beginPath();
+    ctx.moveTo(x, y - 40);
+    ctx.lineTo(x, y - 28);
+    ctx.stroke();
+  }
+
+  // Contemplating indicator - thought cloud
+  if (state === 'contemplating') {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.beginPath();
+    ctx.arc(x, y - 38, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x - 6, y - 32, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + 8, y - 34, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Walking indicator - small footsteps/motion lines
+  if (state === 'walking') {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x - 35, y + 5);
+    ctx.lineTo(x - 40, y + 5);
+    ctx.moveTo(x - 35, y + 10);
+    ctx.lineTo(x - 42, y + 10);
+    ctx.stroke();
+  }
+
+  // Idle - subtle glow
+  if (state === 'idle') {
+    ctx.beginPath();
+    ctx.arc(x, y, 30, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.fill();
   }
 }
 

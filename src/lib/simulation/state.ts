@@ -6,7 +6,31 @@
 import { PHILOSOPHER_IDENTITIES } from '../agents';
 
 // Agent visual state for rendering
-export type AgentState = 'wandering' | 'conversing' | 'idle' | 'thinking';
+export type AgentState = 'walking' | 'reading' | 'contemplating' | 'conversing' | 'idle';
+
+// Activity an agent can be doing
+export type Activity = 'reading' | 'contemplating' | 'studying' | 'seeking_conversation';
+
+// Locations in the library
+export interface LibraryLocation {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  type: 'bookshelf' | 'desk' | 'alcove' | 'table';
+  themes: string[]; // What topics are here
+}
+
+// Library locations
+export const LIBRARY_LOCATIONS: LibraryLocation[] = [
+  { id: 'alchemy_table', name: 'Alchemy Table', x: 80, y: 200, type: 'table', themes: ['alchemy', 'transmutation', 'elements'] },
+  { id: 'hermetic_shelf', name: 'Hermetic Texts', x: 200, y: 140, type: 'bookshelf', themes: ['hermes', 'divine', 'soul'] },
+  { id: 'natural_shelf', name: 'Natural Philosophy', x: 400, y: 140, type: 'bookshelf', themes: ['nature', 'elements', 'matter'] },
+  { id: 'mystical_shelf', name: 'Mystical Works', x: 600, y: 140, type: 'bookshelf', themes: ['divine', 'illumination', 'wisdom'] },
+  { id: 'reading_desk', name: 'Reading Desk', x: 700, y: 220, type: 'desk', themes: [] },
+  { id: 'contemplation_alcove', name: 'Quiet Alcove', x: 400, y: 450, type: 'alcove', themes: ['contemplation', 'reflection'] },
+  { id: 'writing_desk', name: 'Writing Desk', x: 150, y: 400, type: 'desk', themes: [] },
+];
 
 // A simulated philosopher agent
 export interface SimAgent {
@@ -24,12 +48,19 @@ export interface SimAgent {
 
   // State
   state: AgentState;
+  activity: Activity | null;
+  targetLocation: string | null; // Location ID they're heading to
+  activityStartTime: number; // When they started current activity
+  activityDuration: number; // How long they'll do it (ms)
+
+  // Conversation
   conversationPartner: string | null;
   lastConversationTime: number;
 
   // From identity
   archetype: string;
   coreBeliefs: string[];
+  interests: string[]; // Topics they're drawn to
 }
 
 // A turn in a conversation
@@ -72,13 +103,13 @@ export const BOUNDS = {
   maxY: CANVAS_HEIGHT - 50,
 };
 
-// Agent colors (distinct, readable)
-const AGENT_COLORS: Record<string, string> = {
-  drebbel: '#4CAF50',   // Green - alchemist
-  ficino: '#9C27B0',    // Purple - hermetic
-  boehme: '#2196F3',    // Blue - mystic
-  paracelsus: '#FF9800', // Orange - physician
-  maier: '#E91E63',     // Pink - rosicrucian
+// Agent colors and interests by archetype
+const AGENT_CONFIG: Record<string, { color: string; interests: string[] }> = {
+  drebbel: { color: '#4CAF50', interests: ['alchemy', 'transmutation', 'elements', 'nature'] },
+  ficino: { color: '#9C27B0', interests: ['hermes', 'divine', 'soul', 'wisdom'] },
+  boehme: { color: '#2196F3', interests: ['divine', 'illumination', 'contemplation'] },
+  paracelsus: { color: '#FF9800', interests: ['alchemy', 'nature', 'elements', 'matter'] },
+  maier: { color: '#E91E63', interests: ['hermes', 'alchemy', 'transmutation', 'wisdom'] },
 };
 
 // Create initial agents from identities
@@ -88,26 +119,32 @@ export function createInitialAgents(): SimAgent[] {
 
   identityKeys.forEach((key, index) => {
     const identity = PHILOSOPHER_IDENTITIES[key as keyof typeof PHILOSOPHER_IDENTITIES];
+    const config = AGENT_CONFIG[key] || { color: '#888888', interests: [] };
 
-    // Spread agents across the canvas
-    const startX = BOUNDS.minX + (index + 1) * ((BOUNDS.maxX - BOUNDS.minX) / (identityKeys.length + 1));
-    const startY = BOUNDS.minY + Math.random() * (BOUNDS.maxY - BOUNDS.minY);
+    // Start agents at different locations
+    const startLocations = ['hermetic_shelf', 'natural_shelf', 'mystical_shelf', 'reading_desk', 'alchemy_table'];
+    const startLoc = LIBRARY_LOCATIONS.find(l => l.id === startLocations[index % startLocations.length])!;
 
     agents.push({
       id: key,
       name: identity.name,
       shortName: identity.name.split(' ')[0].slice(0, 3).toUpperCase(),
-      color: AGENT_COLORS[key] || '#888888',
-      x: startX,
-      y: startY,
-      targetX: startX,
-      targetY: startY,
-      speed: 0.5 + Math.random() * 0.3, // Slightly varied speeds
+      color: config.color,
+      x: startLoc.x + (Math.random() - 0.5) * 40,
+      y: startLoc.y + 30 + Math.random() * 20,
+      targetX: startLoc.x,
+      targetY: startLoc.y + 30,
+      speed: 0.8 + Math.random() * 0.4,
       state: 'idle',
+      activity: null,
+      targetLocation: null,
+      activityStartTime: 0,
+      activityDuration: 0,
       conversationPartner: null,
-      lastConversationTime: 0,
+      lastConversationTime: -10000, // Allow immediate first conversation
       archetype: identity.archetype.replace('_', ' '),
       coreBeliefs: identity.coreBeliefs,
+      interests: config.interests,
     });
   });
 

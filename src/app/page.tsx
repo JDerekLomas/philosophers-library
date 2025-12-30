@@ -179,12 +179,17 @@ export default function Home() {
                       {agent.name}
                     </div>
                     <div className="text-xs text-gray-500 capitalize">
-                      {agent.state}
-                      {agent.conversationPartner && (
+                      {agent.state === 'conversing' ? (
                         <span className="text-amber-500">
-                          {' '}with{' '}
+                          conversing with{' '}
                           {state.agents.find(a => a.id === agent.conversationPartner)?.name.split(' ')[0]}
                         </span>
+                      ) : agent.state === 'walking' ? (
+                        <span>
+                          walking to {agent.activity === 'seeking_conversation' ? 'find someone' : agent.targetLocation?.replace('_', ' ') || 'somewhere'}
+                        </span>
+                      ) : (
+                        <span>{agent.activity || agent.state}</span>
                       )}
                     </div>
                   </div>
