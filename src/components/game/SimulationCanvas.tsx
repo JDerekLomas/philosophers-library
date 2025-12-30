@@ -12,7 +12,10 @@ import {
 
 interface SimulationCanvasProps {
   state: SimulationState;
+  onAgentClick?: (agent: SimAgent) => void;
 }
+
+const AGENT_RADIUS = 25;
 
 // Draw the library background
 function drawBackground(ctx: CanvasRenderingContext2D): void {
@@ -110,8 +113,19 @@ function drawBackground(ctx: CanvasRenderingContext2D): void {
 }
 
 // Draw a single agent
-function drawAgent(ctx: CanvasRenderingContext2D, agent: SimAgent): void {
+function drawAgent(ctx: CanvasRenderingContext2D, agent: SimAgent, isSelected: boolean): void {
   const { x, y, color, shortName, name, state } = agent;
+
+  // Selection glow
+  if (isSelected) {
+    ctx.beginPath();
+    ctx.arc(x, y, 35, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 215, 0, 0.3)';
+    ctx.fill();
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
 
   // Shadow
   ctx.beginPath();
@@ -204,7 +218,7 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: SimAgent): void {
   }
 }
 
-export default function SimulationCanvas({ state }: SimulationCanvasProps) {
+export default function SimulationCanvas({ state, onAgentClick }: SimulationCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bgCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -222,6 +236,33 @@ export default function SimulationCanvas({ state }: SimulationCanvasProps) {
     }
   }, []);
 
+  // Handle canvas click
+  const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !onAgentClick) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const clickX = (e.clientX - rect.left) * scaleX;
+    const clickY = (e.clientY - rect.top) * scaleY;
+
+    // Check if click is on any agent (check in reverse for top-most first)
+    const sortedAgents = [...state.agents].sort((a, b) => b.y - a.y);
+    for (const agent of sortedAgents) {
+      const dx = clickX - agent.x;
+      const dy = clickY - agent.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance <= AGENT_RADIUS + 5) {
+        onAgentClick(agent);
+        return;
+      }
+    }
+
+    // Clicked on empty space - deselect
+    onAgentClick(null as unknown as SimAgent);
+  }, [state.agents, onAgentClick]);
+
   // Draw frame
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -237,7 +278,8 @@ export default function SimulationCanvas({ state }: SimulationCanvasProps) {
     // Draw agents (sorted by Y for depth)
     const sortedAgents = [...state.agents].sort((a, b) => a.y - b.y);
     for (const agent of sortedAgents) {
-      drawAgent(ctx, agent);
+      const isSelected = agent.id === state.selectedAgentId;
+      drawAgent(ctx, agent, isSelected);
     }
 
     // Pause overlay
@@ -261,10 +303,12 @@ export default function SimulationCanvas({ state }: SimulationCanvasProps) {
       ref={canvasRef}
       width={CANVAS_WIDTH}
       height={CANVAS_HEIGHT}
+      onClick={handleClick}
       style={{
         border: '2px solid #4a4a6a',
         borderRadius: '4px',
         imageRendering: 'crisp-edges',
+        cursor: 'pointer',
       }}
     />
   );

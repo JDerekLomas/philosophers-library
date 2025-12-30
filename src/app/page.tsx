@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import SimulationCanvas from '@/components/game/SimulationCanvas';
-import DialogueBox from '@/components/game/DialogueBox';
-import { createInitialState, SimulationState } from '@/lib/simulation/state';
+import ThoughtBubble from '@/components/game/ThoughtBubble';
+import { createInitialState, SimulationState, SimAgent, LIBRARY_LOCATIONS } from '@/lib/simulation/state';
 import { initializeSimulation, updateMovement, handleConversations } from '@/lib/simulation/loop';
 
 export default function Home() {
@@ -87,6 +87,83 @@ export default function Home() {
     }
   }, [triggerUpdate]);
 
+  // Handle agent click
+  const handleAgentClick = useCallback(async (agent: SimAgent | null) => {
+    if (!stateRef.current) return;
+
+    // Deselect if clicking empty space or same agent
+    if (!agent || agent.id === stateRef.current.selectedAgentId) {
+      stateRef.current.selectedAgentId = null;
+      stateRef.current.agentThought = null;
+      triggerUpdate();
+      return;
+    }
+
+    // Select the agent
+    stateRef.current.selectedAgentId = agent.id;
+    stateRef.current.agentThought = null;
+    triggerUpdate();
+
+    // If agent is conversing, just show the conversation (no need to generate thought)
+    if (agent.state === 'conversing') {
+      return;
+    }
+
+    // Generate thought for reading/contemplating/idle agents
+    if (agent.state === 'reading' || agent.state === 'contemplating' || agent.state === 'idle') {
+      stateRef.current.isGeneratingThought = true;
+      triggerUpdate();
+
+      try {
+        const locationName = agent.targetLocation
+          ? LIBRARY_LOCATIONS.find(l => l.id === agent.targetLocation)?.name || 'the library'
+          : 'the library';
+
+        const response = await fetch('/api/thought', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentName: agent.name,
+            archetype: agent.archetype,
+            coreBeliefs: agent.coreBeliefs,
+            activity: agent.activity || agent.state,
+            location: locationName,
+            interests: agent.interests,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (stateRef.current && stateRef.current.selectedAgentId === agent.id) {
+            stateRef.current.agentThought = {
+              agentId: agent.id,
+              agentName: agent.name,
+              context: `${agent.activity || agent.state} at ${locationName}`,
+              thought: data.thought,
+              timestamp: Date.now(),
+            };
+          }
+        }
+      } catch (error) {
+        console.error('Failed to generate thought:', error);
+      } finally {
+        if (stateRef.current) {
+          stateRef.current.isGeneratingThought = false;
+          triggerUpdate();
+        }
+      }
+    }
+  }, [triggerUpdate]);
+
+  // Close thought bubble
+  const handleCloseThought = useCallback(() => {
+    if (stateRef.current) {
+      stateRef.current.selectedAgentId = null;
+      stateRef.current.agentThought = null;
+      triggerUpdate();
+    }
+  }, [triggerUpdate]);
+
   if (!state) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
@@ -111,7 +188,8 @@ export default function Home() {
         <div className="flex gap-6">
           {/* Main canvas area */}
           <div className="flex-1">
-            <SimulationCanvas state={state} />
+            <SimulationCanvas state={state} onAgentClick={handleAgentClick} />
+            <p className="text-gray-600 text-xs mt-2">Click on a philosopher to see their thoughts</p>
 
             {/* Controls */}
             <div className="mt-4 flex items-center gap-4">
@@ -148,13 +226,16 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Dialogue box */}
-            <div className="mt-4">
-              <DialogueBox
+            {/* Thought/Dialogue display */}
+            {state.selectedAgentId && (
+              <ThoughtBubble
+                agent={state.agents.find(a => a.id === state.selectedAgentId) || null}
+                thought={state.agentThought}
                 conversation={state.activeConversation}
-                isGenerating={isGenerating}
+                isGenerating={state.isGeneratingThought}
+                onClose={handleCloseThought}
               />
-            </div>
+            )}
           </div>
 
           {/* Sidebar - Agent list */}

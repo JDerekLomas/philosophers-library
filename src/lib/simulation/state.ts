@@ -81,6 +81,15 @@ export interface ActiveConversation {
   isGenerating: boolean;
 }
 
+// Agent's internal thoughts (when reading, contemplating)
+export interface AgentThought {
+  agentId: string;
+  agentName: string;
+  context: string; // What triggered the thought (book title, location)
+  thought: string;
+  timestamp: number;
+}
+
 // Full simulation state
 export interface SimulationState {
   agents: SimAgent[];
@@ -89,6 +98,9 @@ export interface SimulationState {
   isPaused: boolean;
   speed: number; // 1 = normal, 2 = fast, 0.5 = slow
   time: number; // Simulation time in ms
+  selectedAgentId: string | null; // Currently selected agent
+  agentThought: AgentThought | null; // Current thought being displayed
+  isGeneratingThought: boolean;
 }
 
 // Canvas dimensions
@@ -160,6 +172,9 @@ export function createInitialState(): SimulationState {
     isPaused: false,
     speed: 1,
     time: 0,
+    selectedAgentId: null,
+    agentThought: null,
+    isGeneratingThought: false,
   };
 }
 
