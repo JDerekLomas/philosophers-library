@@ -3,8 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import SimulationCanvas from '@/components/game/SimulationCanvas';
 import ThoughtBubble from '@/components/game/ThoughtBubble';
-import { createInitialState, SimulationState, SimAgent, LIBRARY_LOCATIONS } from '@/lib/simulation/state';
+import { createInitialState, SimulationState, SimAgent } from '@/lib/simulation/state';
 import { initializeSimulation, updateMovement, handleConversations } from '@/lib/simulation/loop';
+import { generateAgentThoughts } from '@/lib/simulation/thoughts';
 
 export default function Home() {
   const [state, setState] = useState<SimulationState | null>(null);
@@ -71,6 +72,21 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [state, triggerUpdate]);
 
+  // Thought generation loop - agents are always thinking
+  useEffect(() => {
+    if (!state) return;
+
+    const thoughtTick = async () => {
+      if (!stateRef.current || stateRef.current.isPaused) return;
+      await generateAgentThoughts(stateRef.current, triggerUpdate);
+    };
+
+    // Run immediately and then every 2 seconds
+    thoughtTick();
+    const interval = setInterval(thoughtTick, 2000);
+    return () => clearInterval(interval);
+  }, [state, triggerUpdate]);
+
   // Toggle pause
   const togglePause = useCallback(() => {
     if (stateRef.current) {
@@ -87,79 +103,26 @@ export default function Home() {
     }
   }, [triggerUpdate]);
 
-  // Handle agent click
-  const handleAgentClick = useCallback(async (agent: SimAgent | null) => {
+  // Handle agent click - just select/deselect, thoughts are already generating
+  const handleAgentClick = useCallback((agent: SimAgent | null) => {
     if (!stateRef.current) return;
 
     // Deselect if clicking empty space or same agent
     if (!agent || agent.id === stateRef.current.selectedAgentId) {
       stateRef.current.selectedAgentId = null;
-      stateRef.current.agentThought = null;
       triggerUpdate();
       return;
     }
 
-    // Select the agent
+    // Select the agent - their thoughts are already in memoryStream
     stateRef.current.selectedAgentId = agent.id;
-    stateRef.current.agentThought = null;
     triggerUpdate();
-
-    // If agent is conversing, just show the conversation (no need to generate thought)
-    if (agent.state === 'conversing') {
-      return;
-    }
-
-    // Generate thought for reading/contemplating/idle agents
-    if (agent.state === 'reading' || agent.state === 'contemplating' || agent.state === 'idle') {
-      stateRef.current.isGeneratingThought = true;
-      triggerUpdate();
-
-      try {
-        const locationName = agent.targetLocation
-          ? LIBRARY_LOCATIONS.find(l => l.id === agent.targetLocation)?.name || 'the library'
-          : 'the library';
-
-        const response = await fetch('/api/thought', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            agentName: agent.name,
-            archetype: agent.archetype,
-            coreBeliefs: agent.coreBeliefs,
-            activity: agent.activity || agent.state,
-            location: locationName,
-            interests: agent.interests,
-          }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (stateRef.current && stateRef.current.selectedAgentId === agent.id) {
-            stateRef.current.agentThought = {
-              agentId: agent.id,
-              agentName: agent.name,
-              context: `${agent.activity || agent.state} at ${locationName}`,
-              thought: data.thought,
-              timestamp: Date.now(),
-            };
-          }
-        }
-      } catch (error) {
-        console.error('Failed to generate thought:', error);
-      } finally {
-        if (stateRef.current) {
-          stateRef.current.isGeneratingThought = false;
-          triggerUpdate();
-        }
-      }
-    }
   }, [triggerUpdate]);
 
   // Close thought bubble
   const handleCloseThought = useCallback(() => {
     if (stateRef.current) {
       stateRef.current.selectedAgentId = null;
-      stateRef.current.agentThought = null;
       triggerUpdate();
     }
   }, [triggerUpdate]);
@@ -189,7 +152,9 @@ export default function Home() {
           {/* Main canvas area */}
           <div className="flex-1">
             <SimulationCanvas state={state} onAgentClick={handleAgentClick} />
-            <p className="text-gray-600 text-xs mt-2">Click on a philosopher to see their thoughts</p>
+            <p className="text-gray-600 text-xs mt-2">
+              Click on a philosopher to observe their stream of consciousness
+            </p>
 
             {/* Controls */}
             <div className="mt-4 flex items-center gap-4">
@@ -230,9 +195,7 @@ export default function Home() {
             {state.selectedAgentId && (
               <ThoughtBubble
                 agent={state.agents.find(a => a.id === state.selectedAgentId) || null}
-                thought={state.agentThought}
                 conversation={state.activeConversation}
-                isGenerating={state.isGeneratingThought}
                 onClose={handleCloseThought}
               />
             )}
@@ -247,30 +210,43 @@ export default function Home() {
               {state.agents.map(agent => (
                 <div
                   key={agent.id}
-                  className="flex items-center gap-3 p-2 rounded bg-gray-800"
+                  onClick={() => handleAgentClick(agent)}
+                  className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${
+                    state.selectedAgentId === agent.id
+                      ? 'bg-amber-900/30 border border-amber-600'
+                      : 'bg-gray-800 hover:bg-gray-750'
+                  }`}
                 >
                   <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold relative"
                     style={{ backgroundColor: agent.color }}
                   >
                     {agent.shortName}
+                    {agent.isGeneratingThought && (
+                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-gray-200 truncate">
                       {agent.name}
                     </div>
-                    <div className="text-xs text-gray-500 capitalize">
-                      {agent.state === 'conversing' ? (
-                        <span className="text-amber-500">
-                          conversing with{' '}
-                          {state.agents.find(a => a.id === agent.conversationPartner)?.name.split(' ')[0]}
+                    <div className="text-xs text-gray-500 capitalize flex items-center gap-2">
+                      <span>
+                        {agent.state === 'conversing' ? (
+                          <span className="text-amber-500">
+                            conversing with{' '}
+                            {state.agents.find(a => a.id === agent.conversationPartner)?.name.split(' ')[0]}
+                          </span>
+                        ) : agent.state === 'walking' ? (
+                          `walking to ${agent.activity === 'seeking_conversation' ? 'find someone' : agent.targetLocation?.replace('_', ' ') || 'somewhere'}`
+                        ) : (
+                          agent.activity || agent.state
+                        )}
+                      </span>
+                      {agent.memoryStream.length > 0 && (
+                        <span className="text-gray-600 text-[10px]">
+                          ({agent.memoryStream.length})
                         </span>
-                      ) : agent.state === 'walking' ? (
-                        <span>
-                          walking to {agent.activity === 'seeking_conversation' ? 'find someone' : agent.targetLocation?.replace('_', ' ') || 'somewhere'}
-                        </span>
-                      ) : (
-                        <span>{agent.activity || agent.state}</span>
                       )}
                     </div>
                   </div>

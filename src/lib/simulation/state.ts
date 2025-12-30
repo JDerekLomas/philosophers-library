@@ -32,6 +32,16 @@ export const LIBRARY_LOCATIONS: LibraryLocation[] = [
   { id: 'writing_desk', name: 'Writing Desk', x: 150, y: 400, type: 'desk', themes: [] },
 ];
 
+// A single thought/observation in the memory stream
+export interface MemoryEntry {
+  id: string;
+  type: 'observation' | 'thought' | 'reflection' | 'dialogue';
+  content: string;
+  timestamp: number;
+  importance: number; // 1-10 scale
+  context?: string; // What triggered this (location, conversation, etc.)
+}
+
 // A simulated philosopher agent
 export interface SimAgent {
   id: string;
@@ -61,6 +71,11 @@ export interface SimAgent {
   archetype: string;
   coreBeliefs: string[];
   interests: string[]; // Topics they're drawn to
+
+  // Memory stream - continuous inner life
+  memoryStream: MemoryEntry[];
+  lastThoughtTime: number; // When they last generated a thought
+  isGeneratingThought: boolean;
 }
 
 // A turn in a conversation
@@ -81,15 +96,6 @@ export interface ActiveConversation {
   isGenerating: boolean;
 }
 
-// Agent's internal thoughts (when reading, contemplating)
-export interface AgentThought {
-  agentId: string;
-  agentName: string;
-  context: string; // What triggered the thought (book title, location)
-  thought: string;
-  timestamp: number;
-}
-
 // Full simulation state
 export interface SimulationState {
   agents: SimAgent[];
@@ -99,8 +105,6 @@ export interface SimulationState {
   speed: number; // 1 = normal, 2 = fast, 0.5 = slow
   time: number; // Simulation time in ms
   selectedAgentId: string | null; // Currently selected agent
-  agentThought: AgentThought | null; // Current thought being displayed
-  isGeneratingThought: boolean;
 }
 
 // Canvas dimensions
@@ -157,6 +161,10 @@ export function createInitialAgents(): SimAgent[] {
       archetype: identity.archetype.replace('_', ' '),
       coreBeliefs: identity.coreBeliefs,
       interests: config.interests,
+      // Memory stream - starts empty, fills as agent thinks
+      memoryStream: [],
+      lastThoughtTime: 0,
+      isGeneratingThought: false,
     });
   });
 
@@ -173,8 +181,6 @@ export function createInitialState(): SimulationState {
     speed: 1,
     time: 0,
     selectedAgentId: null,
-    agentThought: null,
-    isGeneratingThought: false,
   };
 }
 
