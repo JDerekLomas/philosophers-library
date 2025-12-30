@@ -1,65 +1,204 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect, useRef, useCallback } from 'react';
+import SimulationCanvas from '@/components/game/SimulationCanvas';
+import DialogueBox from '@/components/game/DialogueBox';
+import { createInitialState, SimulationState } from '@/lib/simulation/state';
+import { initializeSimulation, simulationStep } from '@/lib/simulation/loop';
 
 export default function Home() {
+  const [state, setState] = useState<SimulationState | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const stateRef = useRef<SimulationState | null>(null);
+  const lastTimeRef = useRef<number>(0);
+  const animationRef = useRef<number>(0);
+
+  // Initialize simulation
+  useEffect(() => {
+    const initialState = createInitialState();
+    initializeSimulation(initialState);
+    setState(initialState);
+    stateRef.current = initialState;
+  }, []);
+
+  // Trigger re-render
+  const triggerUpdate = useCallback(() => {
+    if (stateRef.current) {
+      setState({ ...stateRef.current });
+      setIsGenerating(stateRef.current.activeConversation?.isGenerating || false);
+    }
+  }, []);
+
+  // Game loop
+  useEffect(() => {
+    if (!state) return;
+
+    const gameLoop = async (currentTime: number) => {
+      if (!stateRef.current) return;
+
+      const deltaTime = lastTimeRef.current ? currentTime - lastTimeRef.current : 16;
+      lastTimeRef.current = currentTime;
+
+      // Run simulation step
+      await simulationStep(stateRef.current, deltaTime, triggerUpdate);
+
+      // Schedule next frame
+      animationRef.current = requestAnimationFrame(gameLoop);
+
+      // Periodic state sync for rendering
+      if (Math.random() < 0.1) {
+        triggerUpdate();
+      }
+    };
+
+    animationRef.current = requestAnimationFrame(gameLoop);
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [state, triggerUpdate]);
+
+  // Toggle pause
+  const togglePause = useCallback(() => {
+    if (stateRef.current) {
+      stateRef.current.isPaused = !stateRef.current.isPaused;
+      triggerUpdate();
+    }
+  }, [triggerUpdate]);
+
+  // Change speed
+  const setSpeed = useCallback((speed: number) => {
+    if (stateRef.current) {
+      stateRef.current.speed = speed;
+      triggerUpdate();
+    }
+  }, [triggerUpdate]);
+
+  if (!state) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <p className="text-gray-400">Loading simulation...</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="min-h-screen bg-gray-950 p-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <header className="mb-6">
+          <h1 className="text-3xl font-bold text-amber-500">
+            The Philosopher&apos;s Library
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="text-gray-400 mt-1">
+            Watch historical philosophers discuss their ideas
           </p>
+        </header>
+
+        <div className="flex gap-6">
+          {/* Main canvas area */}
+          <div className="flex-1">
+            <SimulationCanvas state={state} />
+
+            {/* Controls */}
+            <div className="mt-4 flex items-center gap-4">
+              <button
+                onClick={togglePause}
+                className={`px-4 py-2 rounded font-medium transition-colors ${
+                  state.isPaused
+                    ? 'bg-green-600 hover:bg-green-700 text-white'
+                    : 'bg-amber-600 hover:bg-amber-700 text-white'
+                }`}
+              >
+                {state.isPaused ? '▶ Resume' : '⏸ Pause'}
+              </button>
+
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400 text-sm">Speed:</span>
+                {[0.5, 1, 2].map(speed => (
+                  <button
+                    key={speed}
+                    onClick={() => setSpeed(speed)}
+                    className={`px-3 py-1 rounded text-sm transition-colors ${
+                      state.speed === speed
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+
+              <div className="text-gray-500 text-sm ml-auto">
+                Conversations: {state.conversationHistory.length}
+              </div>
+            </div>
+
+            {/* Dialogue box */}
+            <div className="mt-4">
+              <DialogueBox
+                conversation={state.activeConversation}
+                isGenerating={isGenerating}
+              />
+            </div>
+          </div>
+
+          {/* Sidebar - Agent list */}
+          <div className="w-64 bg-gray-900 rounded-lg p-4">
+            <h2 className="text-lg font-semibold text-gray-200 mb-4">
+              Philosophers
+            </h2>
+            <div className="space-y-3">
+              {state.agents.map(agent => (
+                <div
+                  key={agent.id}
+                  className="flex items-center gap-3 p-2 rounded bg-gray-800"
+                >
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
+                    style={{ backgroundColor: agent.color }}
+                  >
+                    {agent.shortName}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-200 truncate">
+                      {agent.name}
+                    </div>
+                    <div className="text-xs text-gray-500 capitalize">
+                      {agent.state}
+                      {agent.conversationPartner && (
+                        <span className="text-amber-500">
+                          {' '}with{' '}
+                          {state.agents.find(a => a.id === agent.conversationPartner)?.name.split(' ')[0]}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Recent conversation log */}
+            {state.conversationHistory.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-sm font-semibold text-gray-400 mb-2">
+                  Recent Topics
+                </h3>
+                <div className="space-y-1">
+                  {state.conversationHistory.slice(-5).reverse().map((conv, i) => (
+                    <div key={conv.id} className="text-xs text-gray-500 truncate">
+                      • {conv.topic}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }
