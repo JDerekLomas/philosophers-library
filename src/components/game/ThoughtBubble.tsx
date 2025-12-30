@@ -79,17 +79,26 @@ export default function ThoughtBubble({
           // Show memory stream
           <div className="space-y-3">
             <div className="text-xs text-gray-500 mb-2">Stream of Consciousness</div>
-            {recentMemories.map((memory, i) => (
-              <div key={memory.id} className={`text-sm ${i === 0 ? 'text-gray-200' : 'text-gray-400'}`}>
-                <span className="text-gray-600 text-xs mr-2">
-                  {memory.type === 'observation' ? '👁' : memory.type === 'reflection' ? '💭' : '·'}
-                </span>
-                <span className={i === 0 ? 'italic' : ''}>&ldquo;{memory.content}&rdquo;</span>
-                {memory.context && i === 0 && (
-                  <div className="text-xs text-gray-600 mt-1 ml-5">{memory.context}</div>
-                )}
-              </div>
-            ))}
+            {recentMemories.map((memory, i) => {
+              // Check if context contains a citation (has author/title pattern)
+              const isCitation = memory.context?.includes(',') && (
+                memory.context.includes('p.') || memory.context.includes('"')
+              );
+
+              return (
+                <div key={memory.id} className={`text-sm ${i === 0 ? 'text-gray-200' : 'text-gray-400'}`}>
+                  <span className="text-gray-600 text-xs mr-2">
+                    {memory.type === 'observation' ? '📖' : memory.type === 'reflection' ? '💭' : '·'}
+                  </span>
+                  <span className={i === 0 ? 'italic' : ''}>&ldquo;{memory.content}&rdquo;</span>
+                  {memory.context && i === 0 && (
+                    <div className={`text-xs mt-1 ml-5 ${isCitation ? 'text-amber-600' : 'text-gray-600'}`}>
+                      {isCitation ? `— ${memory.context}` : memory.context}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : (
           // No memories yet

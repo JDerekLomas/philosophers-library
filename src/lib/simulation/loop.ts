@@ -3,7 +3,7 @@
  * Separated into sync movement (60fps) and async conversations
  */
 
-import { SimulationState } from './state';
+import { SimulationState, SimAgent } from './state';
 import { updateAgentMovement, findConversationCandidates, startWandering } from './movement';
 import {
   startConversation,
@@ -18,7 +18,40 @@ import {
 let isGeneratingDialogue = false;
 let lastConversationCheck = 0;
 
-// Generate dialogue turn via API
+// Source passage type
+interface SourcePassage {
+  text: string;
+  bookTitle: string;
+  page?: number;
+  citation: string;
+}
+
+// Fetch relevant source passages for dialogue
+async function fetchDialogueSources(
+  speaker: SimAgent,
+  topic: string
+): Promise<SourcePassage[]> {
+  try {
+    const response = await fetch('/api/sources', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        philosopherId: speaker.id,
+        topic,
+        limit: 2,
+      }),
+    });
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    return data.passages || [];
+  } catch {
+    return [];
+  }
+}
+
+// Generate dialogue turn via API - grounded in source texts
 async function generateDialogueTurn(
   state: SimulationState
 ): Promise<string | null> {
@@ -35,10 +68,14 @@ async function generateDialogueTurn(
   conv.isGenerating = true;
 
   try {
+    // Fetch relevant source passages for this speaker and topic
+    const sourcePassages = await fetchDialogueSources(speaker, conv.topic);
+
     const { systemPrompt, conversationHistory } = buildDialogueContext(
       speaker,
       otherAgent,
-      conv
+      conv,
+      sourcePassages
     );
 
     const response = await fetch('/api/chat', {

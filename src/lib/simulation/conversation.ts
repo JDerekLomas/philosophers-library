@@ -129,19 +129,38 @@ export function formatConversation(conversation: ActiveConversation): string {
     .join('\n\n');
 }
 
+// Source passage for grounding dialogue
+interface SourcePassage {
+  text: string;
+  bookTitle: string;
+  page?: number;
+  citation: string;
+}
+
 // Build context for generating a response
 export function buildDialogueContext(
   speaker: SimAgent,
   otherAgent: SimAgent,
-  conversation: ActiveConversation
+  conversation: ActiveConversation,
+  sourcePassages: SourcePassage[] = []
 ): {
   systemPrompt: string;
   conversationHistory: string;
 } {
+  // Build source context if passages are available
+  let sourceContext = '';
+  if (sourcePassages.length > 0) {
+    sourceContext = '\n\nRelevant passages from your writings to draw upon:\n';
+    sourceContext += sourcePassages.map(p =>
+      `[${p.bookTitle}${p.page ? `, p. ${p.page}` : ''}]: "${p.text.slice(0, 250)}${p.text.length > 250 ? '...' : ''}"`
+    ).join('\n\n');
+  }
+
   const systemPrompt = `You are ${speaker.name}, a ${speaker.archetype} philosopher.
 
 Your core beliefs:
 ${speaker.coreBeliefs.map(b => `- ${b}`).join('\n')}
+${sourceContext}
 
 You are having a philosophical dialogue with ${otherAgent.name}, a ${otherAgent.archetype}.
 
@@ -150,7 +169,7 @@ The topic of discussion is: ${conversation.topic}
 Guidelines:
 - Stay in character as ${speaker.name}
 - Speak in a manner befitting a Renaissance philosopher
-- Reference your core beliefs when relevant
+- ${sourcePassages.length > 0 ? 'Draw upon or reference your actual writings when relevant' : 'Reference your core beliefs when relevant'}
 - Engage thoughtfully with what the other philosopher says
 - Keep responses to 2-3 sentences
 - Be substantive but concise`;

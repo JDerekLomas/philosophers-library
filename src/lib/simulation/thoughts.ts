@@ -2,6 +2,8 @@
  * Continuous Thought Generation System
  * Agents are always thinking - generating observations, reflections, and ideas
  * Based on Stanford Generative Agents architecture
+ *
+ * Thoughts are grounded in actual source texts from sourcelibrary-v2
  */
 
 import { SimAgent, SimulationState, MemoryEntry, LIBRARY_LOCATIONS } from './state';
@@ -11,6 +13,14 @@ const THOUGHT_INTERVAL = 8000; // Every 8 seconds base
 
 // Maximum memories to keep per agent (prevents unbounded growth)
 const MAX_MEMORIES = 50;
+
+// Source passage for grounding thoughts
+interface SourcePassage {
+  text: string;
+  bookTitle: string;
+  page?: number;
+  citation: string;
+}
 
 // Generate a unique ID for memory entries
 function generateId(): string {
@@ -62,13 +72,47 @@ function getRecentMemories(agent: SimAgent, count: number = 3): string {
   return recent.map(m => `- ${m.content}`).join('\n');
 }
 
-// Generate a thought via API
+// Fetch relevant source passages for this agent
+async function fetchSourcePassages(
+  agent: SimAgent,
+  topic: string
+): Promise<SourcePassage[]> {
+  try {
+    const response = await fetch('/api/sources', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        philosopherId: agent.id,
+        topic,
+        limit: 2,
+      }),
+    });
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    return data.passages || [];
+  } catch {
+    return [];
+  }
+}
+
+// Generate a thought via API - grounded in source texts
 async function generateThought(
   agent: SimAgent,
   state: SimulationState
 ): Promise<MemoryEntry | null> {
   const context = getAgentContext(agent, state);
   const recentMemories = getRecentMemories(agent);
+
+  // Determine a topic based on location/activity for source retrieval
+  const location = agent.targetLocation
+    ? LIBRARY_LOCATIONS.find(l => l.id === agent.targetLocation)
+    : null;
+  const topic = location?.themes[0] || agent.interests[0] || 'philosophy';
+
+  // Fetch relevant passages from their actual writings
+  const passages = await fetchSourcePassages(agent, topic);
 
   try {
     const response = await fetch('/api/thought', {
@@ -82,6 +126,7 @@ async function generateThought(
         location: context,
         interests: agent.interests,
         recentMemories,
+        sourcePassages: passages,
         mode: 'stream', // Continuous stream mode
       }),
     });
@@ -90,13 +135,16 @@ async function generateThought(
 
     const data = await response.json();
 
+    // Include citation if a source was referenced
+    const citation = passages.length > 0 ? passages[0].citation : undefined;
+
     return {
       id: generateId(),
       type: agent.state === 'reading' ? 'observation' : 'thought',
       content: data.thought,
       timestamp: Date.now(),
-      importance: 5 + Math.floor(Math.random() * 3), // 5-7 base importance
-      context,
+      importance: passages.length > 0 ? 7 : 5 + Math.floor(Math.random() * 2), // Higher importance if grounded in sources
+      context: citation || context,
     };
   } catch (error) {
     console.error('Failed to generate thought:', error);
